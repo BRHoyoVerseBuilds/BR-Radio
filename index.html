@@ -1,1 +1,322 @@
+<html><head><base href="https://raw.githubusercontent.com/BRHoyoVerseBuilds/BR-Radio/main/Album/">
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
 
+body {
+    font-family: 'Open Sans', sans-serif;
+    margin: 0;
+    padding: 20px;
+    background: #1a1a1a;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.player-container {
+    width: 100%;
+    max-width: 500px;
+    background: #2a2a2a;
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+}
+
+.playlist-selector {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 20px;
+    background: #333;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.track-info {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.track-title {
+    font-size: 1.2em;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    margin: 20px 0;
+}
+
+.control-btn {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 24px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.control-btn:hover {
+    transform: scale(1.1);
+}
+
+.progress-container {
+    width: 100%;
+    height: 5px;
+    background: #444;
+    border-radius: 5px;
+    margin: 20px 0;
+    cursor: pointer;
+}
+
+.progress-bar {
+    height: 100%;
+    background: #1db954;
+    border-radius: 5px;
+    width: 0%;
+    transition: width 0.1s linear;
+}
+
+.time-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8em;
+    color: #888;
+}
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.volume-slider {
+    width: 100px;
+    height: 5px;
+    -webkit-appearance: none;
+    background: #444;
+    border-radius: 5px;
+}
+
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    background: #1db954;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.loading {
+    text-align: center;
+    color: #888;
+}
+</style>
+</head>
+<body>
+<div class="player-container">
+    <select class="playlist-selector" id="playlistSelector">
+        <option value="">Loading playlists...</option>
+    </select>
+    
+    <div class="track-info">
+        <div class="track-title" id="trackTitle">Select a playlist</div>
+    </div>
+    
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+    
+    <div class="time-info">
+        <span id="currentTime">0:00</span>
+        <span id="duration">0:00</span>
+    </div>
+    
+    <div class="controls">
+        <button class="control-btn" id="prevBtn"><i class="bi bi-skip-backward-fill"></i></button>
+        <button class="control-btn" id="playBtn"><i class="bi bi-play-fill"></i></button>
+        <button class="control-btn" id="nextBtn"><i class="bi bi-skip-forward-fill"></i></button>
+    </div>
+    
+    <div class="volume-control">
+        <i class="bi bi-volume-up"></i>
+        <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="100">
+    </div>
+</div>
+
+<script>
+class MusicPlayer {
+    constructor() {
+        this.audio = new Audio();
+        this.playlists = {};
+        this.currentPlaylist = null;
+        this.currentTrackIndex = 0;
+        this.isPlaying = false;
+        
+        this.initializeElements();
+        this.setupEventListeners();
+        this.loadPlaylists();
+    }
+    
+    initializeElements() {
+        this.playlistSelector = document.getElementById('playlistSelector');
+        this.trackTitle = document.getElementById('trackTitle');
+        this.progressBar = document.getElementById('progressBar');
+        this.progressContainer = document.getElementById('progressContainer');
+        this.currentTimeElement = document.getElementById('currentTime');
+        this.durationElement = document.getElementById('duration');
+        this.playBtn = document.getElementById('playBtn');
+        this.prevBtn = document.getElementById('prevBtn');
+        this.nextBtn = document.getElementById('nextBtn');
+        this.volumeSlider = document.getElementById('volumeSlider');
+    }
+    
+    setupEventListeners() {
+        this.playBtn.addEventListener('click', () => this.togglePlay());
+        this.prevBtn.addEventListener('click', () => this.playPrevious());
+        this.nextBtn.addEventListener('click', () => this.playNext());
+        this.playlistSelector.addEventListener('change', (e) => this.changePlaylist(e.target.value));
+        this.volumeSlider.addEventListener('input', (e) => this.setVolume(e.target.value));
+        
+        this.progressContainer.addEventListener('click', (e) => {
+            const rect = this.progressContainer.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            this.audio.currentTime = percent * this.audio.duration;
+        });
+        
+        this.audio.addEventListener('timeupdate', () => this.updateProgress());
+        this.audio.addEventListener('ended', () => this.playNext());
+        this.audio.addEventListener('loadedmetadata', () => {
+            this.durationElement.textContent = this.formatTime(this.audio.duration);
+        });
+        
+        this.audio.addEventListener('error', (e) => {
+            console.error('Audio error:', e);
+            this.trackTitle.textContent = 'Error loading audio';
+        });
+    }
+    
+    async loadPlaylists() {
+        try {
+            const response = await axios.get('https://api.github.com/repos/BRHoyoVerseBuilds/BR-Radio/contents/Album');
+            const folders = response.data.filter(item => item.type === 'dir');
+            
+            for (const folder of folders) {
+                const songsResponse = await axios.get(`https://api.github.com/repos/BRHoyoVerseBuilds/BR-Radio/contents/Album/${folder.name}`);
+                this.playlists[folder.name] = songsResponse.data
+                    .filter(file => file.name.endsWith('.mp3'))
+                    .map(file => ({
+                        name: file.name,
+                        url: file.download_url
+                    }));
+            }
+            
+            this.playlistSelector.innerHTML = `
+                <option value="">Select a playlist</option>
+                ${Object.keys(this.playlists).map(playlist => 
+                    `<option value="${playlist}">${playlist}</option>`
+                ).join('')}
+            `;
+        } catch (error) {
+            console.error('Error loading playlists:', error);
+            this.trackTitle.textContent = 'Error loading playlists';
+        }
+    }
+    
+    changePlaylist(playlistName) {
+        if (!playlistName) return;
+        
+        this.currentPlaylist = playlistName;
+        this.currentTrackIndex = 0;
+        this.playTrack();
+    }
+    
+    playTrack() {
+        if (!this.currentPlaylist) return;
+        
+        const tracks = this.playlists[this.currentPlaylist];
+        if (!tracks || !tracks.length) return;
+        
+        const track = tracks[this.currentTrackIndex];
+        this.audio.src = track.url;
+        this.trackTitle.textContent = track.name.replace('.mp3', '');
+        
+        this.audio.load();
+        this.audio.play()
+            .catch(error => {
+                console.error('Error playing track:', error);
+                this.trackTitle.textContent = 'Error playing track';
+            });
+            
+        this.isPlaying = true;
+        this.updatePlayButton();
+    }
+    
+    togglePlay() {
+        if (!this.audio.src) return;
+        
+        if (this.isPlaying) {
+            this.audio.pause();
+        } else {
+            this.audio.play()
+                .catch(error => {
+                    console.error('Error playing audio:', error);
+                    this.trackTitle.textContent = 'Error playing audio';
+                });
+        }
+        this.isPlaying = !this.isPlaying;
+        this.updatePlayButton();
+    }
+    
+    playNext() {
+        if (!this.currentPlaylist) return;
+        
+        const tracks = this.playlists[this.currentPlaylist];
+        this.currentTrackIndex = (this.currentTrackIndex + 1) % tracks.length;
+        this.playTrack();
+    }
+    
+    playPrevious() {
+        if (!this.currentPlaylist) return;
+        
+        const tracks = this.playlists[this.currentPlaylist];
+        this.currentTrackIndex = (this.currentTrackIndex - 1 + tracks.length) % tracks.length;
+        this.playTrack();
+    }
+    
+    updateProgress() {
+        const percent = (this.audio.currentTime / this.audio.duration) * 100;
+        this.progressBar.style.width = `${percent}%`;
+        this.currentTimeElement.textContent = this.formatTime(this.audio.currentTime);
+    }
+    
+    setVolume(value) {
+        this.audio.volume = value / 100;
+    }
+    
+    updatePlayButton() {
+        this.playBtn.innerHTML = this.isPlaying ? 
+            '<i class="bi bi-pause-fill"></i>' : 
+            '<i class="bi bi-play-fill"></i>';
+    }
+    
+    formatTime(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+}
+
+const player = new MusicPlayer();
+</script>
+</body>
+</html>
